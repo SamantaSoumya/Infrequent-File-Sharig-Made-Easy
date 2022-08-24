@@ -6,10 +6,18 @@
 }
 
 /* navbar */
-.navbar-brand {
+.navb{
     height: 80px;
     padding: 0px;
 }
+
+@media only screen and (max-width: 460px) {
+    .navb {
+        text-align: center;
+        display: block;
+    }
+}
+
 /* navbar */
 /* op */
 .op h2 {
@@ -25,6 +33,7 @@
     animation: animtext 4s steps(80, end);
     transition: all cubic-bezier(0.1, 0.7, 1.0, 0.1);
 }
+
 .opp h2 {
     color: black;
     font-family: "arial";
@@ -45,28 +54,28 @@
         transition: all 2s ease-in-out;
     }
 }
+
 @media only screen and (max-width: 960px) {
-    .op h2{
+    .op h2 {
         font-size: 3rem;
     }
-  }
+}
+
 @media only screen and (max-width: 680px) {
-    .op{
+    .op {
         display: none;
     }
 
-    .opp h2{
+    .opp h2 {
         display: block;
     }
-  }
+}
+
 @media only screen and (max-width: 460px) {
-    .op{
-        display: none;
+    .opp h2 {
+        font-size: 3rem;
     }
-    .opp{
-        display: none;
-    }
-  }
+}
 
 /* op */
 /* about */
