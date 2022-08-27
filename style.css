@@ -78,6 +78,57 @@
 }
 
 /* op */
+/* main */
+.col{
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 450px;
+}
+.shadow{
+    box-shadow: 4px 1rem 1rem 7px rgb(0 0 0 / 15%) !important;
+}
+.file-icon{
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+}
+.file-icon img{
+    width: 75px;
+    position: absolute;
+    transition: transform .500ms ease-in-out;
+}
+.file-icon .mid{
+    z-index: 2;
+}
+#fileinput{
+    display: none;
+}
+.file-upload{
+    position: relative;
+    margin-top: 150px;
+}
+.title{
+    position: relative;
+    font-weight: bold;
+}
+.dragged .file-icon .right{
+    transform: rotate(10deg) translateX(10px) scale(.9);
+    transform-origin: bottom;
+}
+.dragged .file-icon .left{
+    transform: rotate(-10deg) translateX(-10px) scale(.9);
+    transform-origin: bottom;
+}
+.dragged .file-icon .mid{
+    transform: translateY(-5px);
+    
+}
+.browsebtn{
+    cursor: pointer;
+}
+/* main */
 /* about */
 .aboutus-section {
     padding: 90px 0;
