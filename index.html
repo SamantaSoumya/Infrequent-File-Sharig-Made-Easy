@@ -1,206 +1,429 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>InFrequent - File Sharing Made Easy</title>
-    <link rel="icon" href="favicon.ico" type="image/x-icon">
-    <link rel="stylesheet" href="bootstrap.css">
-    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.0.8/css/all.css">
-    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css">
-    <!-- <link rel="stylesheet" href="http://127.0.0.1:5500/bootstrap.css.map"> -->
-    <link rel="stylesheet" href="style.css">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Ubuntu&display=swap" rel="stylesheet">
-    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
-    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>
-    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
-</head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InFrequent — P2P File Sharing</title>
+  <link rel="icon" href="favicon.ico" type="image/x-icon">
 
+  <!-- Google Fonts: Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+  <!-- Three.js -->
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+
+  <!-- PeerJS (WebRTC wrapper) -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+
+  <!-- QRCode.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <!-- JSZip (zip multiple files before sending) -->
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+
+  <!-- jsQR (in-browser camera QR code reader) -->
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+
+
+  <link rel="stylesheet" href="style.css">
+</head>
 <body>
-    <!-- navbar -->
-    <nav class="navba" style="height:100px; width: 100%;">
-        <a class="navb" href="/">
-            <img src="logo.png" width="200px" height="80px" alt="">
-        </a>
-    </nav>
-    <!-- navbar -->
-    <!-- welcome -->
-    <div class="">
-        <div class="op">
-            <h2><span style="color:#34A853;">Welcome </span><span style="color:#FBBC04;">to </span><span
-                    style="color:#EA4335;">InFrequent </span><span style="color:#4285F4;">File </span><span
-                    style="color:#FBBC04;">Sharing </span><span style="color:#EA4335;">Made </span><span
-                    style="color:#4285F4;">Easy</span>
-            </h2>
-        </div>
-        <div class="opp">
-            <h2><span style="color:#34A853;">Welcome </span><span style="color:#FBBC04;">to </span><span
-                    style="color:#EA4335;">InFrequent</span></h2>
-        </div>
+
+  <!-- ══ THREE.JS CANVAS BACKGROUND ══════════════════════════ -->
+  <canvas id="bg-canvas"></canvas>
+
+  <!-- ══ NAVBAR ═══════════════════════════════════════════════ -->
+  <nav class="navbar">
+    <div class="nav-brand">
+      <div class="brand-icon">
+        <i data-lucide="zap"></i>
+      </div>
+      <span class="brand-name">InFrequent</span>
     </div>
-    <!-- welcome -->
-    <!-- main section -->
-    <div class="container">
-        <div class="row">
-          <div class="col">
-            <div>
-                <img style="height: 220px;" src="download.jfif" alt="">
+    <span class="nav-badge">
+      <i data-lucide="shield-check"></i>
+      Zero Storage · P2P Encrypted
+    </span>
+  </nav>
+
+  <!-- ══ HERO ═════════════════════════════════════════════════ -->
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-pill">
+        <i data-lucide="wifi"></i>
+        <span>Browser-to-Browser · No Server · No Sign-Up</span>
+      </div>
+      <h1 class="hero-title">
+        Share Files<br>
+        <span class="gradient-text">Instantly & Privately</span>
+      </h1>
+      <p class="hero-sub">
+        Drop a file. Get a Room ID. Share it. That's it.<br>
+        Your bytes never touch our servers.
+      </p>
+      <div class="hero-stats">
+        <div class="stat"><span class="stat-val">0%</span><span class="stat-lbl">Server Storage</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat"><span class="stat-val">E2E</span><span class="stat-lbl">DTLS Encrypted</span></div>
+        <div class="stat-divider"></div>
+        <div class="stat"><span class="stat-val">P2P</span><span class="stat-lbl">Direct Transfer</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ TRANSFER PANEL ═══════════════════════════════════════ -->
+  <section class="transfer-section">
+    <div class="panel glass-card">
+
+      <!-- Tab Switcher -->
+      <div class="tab-switcher">
+        <button class="tab-btn active" data-tab="send">
+          <i data-lucide="upload-cloud"></i>
+          <span>Send File</span>
+        </button>
+        <button class="tab-btn" data-tab="receive">
+          <i data-lucide="download-cloud"></i>
+          <span>Receive File</span>
+        </button>
+      </div>
+
+      <!-- ─── SEND PANEL ──────────────────────────────────── -->
+      <div class="tab-content active" id="send-panel">
+
+        <!-- STATE: File Selection -->
+        <div class="pstate active" id="state-select">
+          <div class="drop-zone" id="drop-zone">
+            <div class="drop-orb">
+              <i data-lucide="cloud-upload"></i>
+            </div>
+            <p class="drop-title">Drag &amp; drop files here</p>
+            <p class="drop-or">— or —</p>
+            <div class="drop-btns">
+              <button class="btn btn-outline" id="browse-btn">
+                <i data-lucide="folder-open"></i> Browse Files
+              </button>
+              <button class="btn btn-outline" id="browse-zip-btn">
+                <i data-lucide="archive"></i> Upload ZIP
+              </button>
+            </div>
+            <p class="drop-hint">Supports any file type · Multiple files auto-zipped</p>
+          </div>
+
+          <!-- Hidden file inputs -->
+          <input type="file" id="file-input" multiple hidden>
+          <input type="file" id="zip-input" accept=".zip" hidden>
+
+          <!-- File List -->
+          <div class="file-list" id="file-list" style="display:none"></div>
+          <div class="zip-notice" id="zip-notice" style="display:none">
+            <i data-lucide="info"></i>
+            Multiple files will be automatically zipped before transfer.
+          </div>
+
+          <!-- Actions -->
+          <div class="panel-actions" id="generate-actions" style="display:none">
+            <button class="btn btn-primary full-width" id="generate-btn">
+              <i data-lucide="link-2"></i> Generate Room ID &amp; Share
+            </button>
+          </div>
+        </div>
+
+        <!-- STATE: Room Ready (waiting for receiver) -->
+        <div class="pstate" id="state-room">
+          <div class="room-card">
+            <p class="room-label">
+              <i data-lucide="share-2"></i>
+              Share this Room ID with the receiver
+            </p>
+            <div class="room-id-row">
+              <span class="room-id-text" id="room-id-text"></span>
+              <button class="icon-btn" id="copy-btn" title="Copy Room ID">
+                <i data-lucide="copy"></i>
+              </button>
+            </div>
+            <div class="room-divider">
+              <span>or scan QR code</span>
+            </div>
+            <!-- QR Code container -->
+            <div class="qr-box">
+              <div id="qr-container"></div>
+              <p class="qr-caption">
+                <i data-lucide="smartphone"></i>
+                Mobile users can scan to connect instantly
+              </p>
             </div>
           </div>
-          <div class="col">
-            <div class="shadow rounded drop-zone" style="height:320px; width:480px; background-color: #f5f2f2;">
-                <div class="file-icon" style="height:240px; width:400px; border:3px dashed #041d2b47; margin: 30px; border-radius: 10px;">
-                    <img src="file.svg" alt="file-icon" class="left" draggable="false">
-                    <img src="file.svg" alt="file-icon" class="mid" draggable="false">
-                    <img src="file.svg" alt="file-icon" class="right" draggable="false">
-                    <div class="file-upload">
-                        <input type="file" name="" id="fileinput">
-                    </div>
-                    <div class="title">
-                        <h4><span style="color:#34A853;">Drag </span><span style="color:#FBBC04;">your </span><span
-                        style="color:#EA4335;">Files </span><span style="color:#4285F4;">here </span><span
-                        style="color:#FBBC04;">or </span>,<span style="color:#EA4335;" class="browsebtn">browse</span></h4>
-                    </div>
-                </div>
-                <!-- <div class="title">Drop your Files here or, <span class="browsebtn">browse</span></div> -->
+          <div class="waiting-row">
+            <div class="ping-dot"></div>
+            <span>Waiting for receiver to connect…</span>
+          </div>
+          <button class="btn btn-ghost small" id="cancel-room-btn">
+            <i data-lucide="x"></i> Cancel
+          </button>
+        </div>
+
+        <!-- STATE: Transferring (Sender) -->
+        <div class="pstate" id="state-transfer-send">
+          <div class="xfer-center">
+            <div class="xfer-orb send-orb">
+              <i data-lucide="send"></i>
+            </div>
+            <p class="xfer-label">Sending…</p>
+            <p class="xfer-fname" id="send-filename"></p>
+          </div>
+          <div class="progress-wrap">
+            <div class="progress-track">
+              <div class="progress-bar" id="send-progress-fill"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="send-pct">0%</span>
+              <span id="send-speed" class="text-muted"></span>
             </div>
           </div>
+        </div>
+
+        <!-- STATE: Send Done -->
+        <div class="pstate" id="state-send-done">
+          <div class="done-center">
+            <div class="done-orb">
+              <i data-lucide="check-circle-2"></i>
+            </div>
+            <p class="done-title">Transfer Complete!</p>
+            <p class="done-sub">The receiver has got the file.</p>
+          </div>
+          <button class="btn btn-outline full-width" id="send-again-btn">
+            <i data-lucide="refresh-cw"></i> Send Another File
+          </button>
+        </div>
+
+      </div>
+      <!-- /send-panel -->
+
+      <!-- ─── RECEIVE PANEL ────────────────────────────────── -->
+      <div class="tab-content" id="receive-panel">
+
+        <!-- STATE: Enter Room ID -->
+        <div class="pstate active" id="state-enter-room">
+          <div class="recv-hero">
+            <div class="recv-icon-wrap">
+              <i data-lucide="inbox"></i>
+            </div>
+            <p class="recv-title">Connect to a sender</p>
+            <p class="recv-sub">Ask the sender for their Room ID, or scan the QR code on their screen.</p>
+          </div>
+          <div class="input-group">
+            <label class="input-label">Room ID</label>
+            <div class="input-row">
+              <input
+                type="text"
+                id="room-input"
+                class="glass-input"
+                placeholder="Paste Room ID here…"
+                autocomplete="off"
+                spellcheck="false"
+              >
+              <button class="btn btn-primary" id="connect-btn">
+                <i data-lucide="plug-zap"></i>
+                Connect
+              </button>
+            </div>
+            <!-- Scan QR button -->
+            <button class="btn btn-scan full-width" id="scan-qr-btn">
+              <i data-lucide="scan"></i>
+              Scan QR Code with Camera
+            </button>
+          </div>
+
+        </div>
+
+        <!-- STATE: Connecting -->
+        <div class="pstate" id="state-connecting">
+          <div class="xfer-center">
+            <div class="xfer-orb recv-orb connecting">
+              <i data-lucide="loader-2"></i>
+            </div>
+            <p class="xfer-label">Connecting…</p>
+            <p class="xfer-fname text-muted">Establishing P2P connection</p>
+          </div>
+        </div>
+
+        <!-- STATE: Receiving -->
+        <div class="pstate" id="state-transfer-recv">
+          <div class="xfer-center">
+            <div class="xfer-orb recv-orb">
+              <i data-lucide="download"></i>
+            </div>
+            <p class="xfer-label">Receiving…</p>
+            <p class="xfer-fname" id="recv-filename"></p>
+          </div>
+          <div class="progress-wrap">
+            <div class="progress-track">
+              <div class="progress-bar recv-bar" id="recv-progress-fill"></div>
+            </div>
+            <div class="progress-meta">
+              <span id="recv-pct">0%</span>
+              <span id="recv-speed" class="text-muted"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- STATE: Receive Done -->
+        <div class="pstate" id="state-recv-done">
+          <div class="done-center">
+            <div class="done-orb recv-done">
+              <i data-lucide="check-circle-2"></i>
+            </div>
+            <p class="done-title">File Received!</p>
+            <p class="done-sub" id="recv-done-meta"></p>
+          </div>
+          <button class="btn btn-outline full-width" id="recv-again-btn">
+            <i data-lucide="refresh-cw"></i> Receive Another File
+          </button>
+        </div>
+
+      </div>
+      <!-- /receive-panel -->
+
+    </div>
+    <!-- /panel -->
+  </section>
+
+  <!-- ══ HOW IT WORKS ══════════════════════════════════════════ -->
+  <section class="how-section">
+    <h2 class="section-title">How it works</h2>
+    <div class="steps-grid">
+      <div class="step-card glass-card">
+        <div class="step-num cyan">01</div>
+        <i data-lucide="upload-cloud" class="step-icon cyan"></i>
+        <h3>Drop Your File</h3>
+        <p>Select or drag any file — images, videos, documents, apps, ZIP archives — anything.</p>
+      </div>
+      <div class="step-arrow"><i data-lucide="arrow-right"></i></div>
+      <div class="step-card glass-card">
+        <div class="step-num violet">02</div>
+        <i data-lucide="link-2" class="step-icon violet"></i>
+        <h3>Get a Room ID</h3>
+        <p>A unique Room ID + QR code is generated. Share either with your receiver.</p>
+      </div>
+      <div class="step-arrow"><i data-lucide="arrow-right"></i></div>
+      <div class="step-card glass-card">
+        <div class="step-num green">03</div>
+        <i data-lucide="zap" class="step-icon green"></i>
+        <h3>Instant Transfer</h3>
+        <p>WebRTC DataChannel streams bytes directly peer-to-peer. No server middleman.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FEATURES ══════════════════════════════════════════════ -->
+  <section class="features-section">
+    <div class="features-grid">
+      <div class="feature-card glass-card">
+        <div class="feat-icon cyan"><i data-lucide="shield-off"></i></div>
+        <h3>Zero Server Storage</h3>
+        <p>Your files never touch any server. They flow directly between browsers via an encrypted channel.</p>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feat-icon violet"><i data-lucide="lock-keyhole"></i></div>
+        <h3>DTLS Encrypted</h3>
+        <p>WebRTC DataChannel uses DTLS 1.2 encryption end-to-end. Even the signaling server can't read your data.</p>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feat-icon green"><i data-lucide="gauge"></i></div>
+        <h3>Full Network Speed</h3>
+        <p>No server upload + download bottleneck. Direct P2P means you get the maximum speed your network allows.</p>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feat-icon orange"><i data-lucide="archive"></i></div>
+        <h3>Multi-File ZIP</h3>
+        <p>Select multiple files and they'll be automatically zipped client-side before transfer. No file size limit imposed by us.</p>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feat-icon pink"><i data-lucide="qr-code"></i></div>
+        <h3>QR Code Sharing</h3>
+        <p>Instantly share your Room ID via QR code — perfect for connecting your phone to your desktop.</p>
+      </div>
+      <div class="feature-card glass-card">
+        <div class="feat-icon sky"><i data-lucide="user-x"></i></div>
+        <h3>No Sign-Up Required</h3>
+        <p>Fully anonymous. No account, no email, no tracking. Open the page and start sharing immediately.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ FOOTER ════════════════════════════════════════════════ -->
+  <footer class="footer">
+    <div class="footer-brand">
+      <div class="brand-icon sm"><i data-lucide="zap"></i></div>
+      <span class="brand-name">InFrequent</span>
+    </div>
+    <p class="footer-tagline">Files never stored · Always encrypted · Always free</p>
+    <div class="footer-links">
+      <a href="https://github.com/SamantaSoumya" target="_blank" title="GitHub">
+        <i data-lucide="github"></i>
+      </a>
+      <a href="https://www.linkedin.com/in/soumya-samanta-0393631a1/" target="_blank" title="LinkedIn">
+        <i data-lucide="linkedin"></i>
+      </a>
+      <a href="https://www.instagram.com/samanta_soumya354/" target="_blank" title="Instagram">
+        <i data-lucide="instagram"></i>
+      </a>
+      <a href="mailto:soumyasamanta354@gmail.com" title="Email">
+        <i data-lucide="mail"></i>
+      </a>
+    </div>
+    <p class="footer-copy">© 2026 Soumya Samanta</p>
+  </footer>
+
+  <!-- ══ QR CAMERA SCANNER OVERLAY ════════════════════════════ -->
+  <div class="scanner-overlay" id="scanner-overlay">
+    <div class="scanner-modal glass-card">
+      <div class="scanner-header">
+        <div class="scanner-title">
+          <i data-lucide="scan"></i>
+          <span>Scan QR Code</span>
+        </div>
+        <button class="icon-btn" id="close-scanner-btn" title="Close">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+
+      <!-- Camera feed -->
+      <div class="scanner-viewport" id="scanner-viewport">
+        <video id="scanner-video" autoplay muted playsinline></video>
+        <!-- Animated scanning frame -->
+        <div class="scanner-frame">
+          <span class="corner tl"></span>
+          <span class="corner tr"></span>
+          <span class="corner bl"></span>
+          <span class="corner br"></span>
+          <div class="scan-beam"></div>
+        </div>
+        <!-- Status badge inside viewport -->
+        <div class="scanner-status" id="scanner-status">
+          <i data-lucide="camera"></i>
+          <span>Scanning…</span>
         </div>
       </div>
-        <!-- main section -->
 
-        <div class="aboutus-section">
-            <div class="container">
-                <div class="row">
-                    <div class="col-md-6 col-sm-6 col-xs-12">
-                        <div class="aboutus">
-                            <h2 style="color: blue;" class="aboutus-title">About Us</h2>
-                            <p style="font-size:18px;" class="aboutus-text" data-aos="fade-right">
-                                InFrequent is India's most reliable sharing application.
-                                ☀️ InFrequent is a safe file sharing application, we will protect your privacy and file
-                                security when
-                                you share files. You can share it for Android and iOS iPhone anywhere.</p>
-                            <p style="font-size:18px;" class="aboutus-text" data-aos="fade-right">
-                                Share Apps & File Transfer - InFrequent satisfies all your transfer needs perfectly.
-                                Just
-                                select videos, games, photos, music, apps & e-book, pdf files or anything, it will
-                                stably
-                                share them to your friends at a lightning speed, even without the....</p>
-                            <a class="aboutus-more" data-aos="fade-right" href="#">read more</a>
-                        </div>
-                    </div>
-                    <div class="col-md-6 col-sm-6 col-xs-12">
-                        <div class="feature">
-                            <div class="feature-box">
-                                <div class="clearfix">
-                                    <div class="iconset">
-                                        <span class="glyphicon glyphicon-cog icon"></span>
-                                    </div>
-                                    <div class="feature-content">
-                                        <h3 style="color: blue;">What's New</h4>
-                                            <p style="font-size:18px;" data-aos="fade-left">
-                                                ⭐️ Faster transfer speed. <br>
-                                                ⭐ ️Share with Email <br>
-                                                ⭐ ️UI improved. <br>
-                                                ⭐️ Bug fixes and performance improvements.</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="feature-box">
-                                <div class="clearfix">
-                                    <div class="iconset">
-                                        <span class="glyphicon glyphicon-cog icon"></span>
-                                    </div>
-                                    <div class="feature-content">
-                                        <h3 style="color: blue;">Data Safety</h3>
-                                        <p style="font-size:18px;" data-aos="fade-left">Safety starts with understanding
-                                            how
-                                            developers collect and share your data. Data privacy and security practices
-                                            may
-                                            vary based on your use, region and age The developer provided this
-                                            information
-                                            and may update it over time</p>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="feature-box">
-                                <div class="clearfix">
-                                    <div class="iconset">
-                                        <span class="glyphicon glyphicon-cog icon"></span>
-                                    </div>
-                                    <div class="feature-content">
-                                        <h3 style="color: blue;">Great support</h3>
-                                        <p style="font-size:18px;" data-aos="fade-left">
-                                            We provide a great team Support. If you have any problem contact with us. We
-                                            will contact with you shortly. We regularly devloped our site.
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        <!-- Footer -->
-        <footer class="text-center text-lg-start bg-dark text-white">
-            <!-- Section: Social media -->
-            <div class="container">
-                <section class="d-flex justify-content-center justify-content-lg-between p-4">
-                    <!-- Left -->
-                    <div class="me-5 d-none d-lg-block connect">
-                        <span>Get connected with us on social networks:</span>
-                    </div>
-                    <!-- Left -->
+      <p class="scanner-hint">
+        Point your camera at the QR code shown on the sender's screen
+      </p>
 
-                    <!-- Right -->
-                    <div class="icons">
-                        <a href="https://www.facebook.com/soumya.samanta.9484" target="_blank" class="me-4 text-reset">
-                            <i class="fab fa-facebook-f"></i>
-                        </a>
-                        <a href="mailto:soumyasamanta354@gmail.com" target="_blank" class="me-4 text-reset">
-                            <i class="fab fa-google"></i>
-                        </a>
-                        <a href="https://www.instagram.com/samanta_soumya354/?hl=en" target="_blank"
-                            class="me-4 text-reset">
-                            <i class="fab fa-instagram"></i>
-                        </a>
-                        <a href="https://www.linkedin.com/in/soumya-samanta-0393631a1/" target="_blank"
-                            class="me-4 text-reset">
-                            <i class="fab fa-linkedin"></i>
-                        </a>
-                        <a href="https://github.com/SamantaSoumya" target="_blank" class="me-4 text-reset">
-                            <i class="fab fa-github"></i>
-                        </a>
-                    </div>
-                    <!-- Right -->
-                </section>
-            </div>
-            <!-- Copyright -->
-            <div class="text-center p-4" style="background-color: rgba(0, 0, 0, 0.05);">
-                © 2022 Copyright: Soumya Samanta
-            </div>
-            <!-- Copyright -->
-        </footer>
-        <!-- Footer -->
-        <script>
-            AOS.init();
-        </script>
-        <script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"
-            integrity="sha384-q8i/X+965DzO0rT7abK41JStQIAqVgRVzpbzo5smXKp4YfRvH+8abtTE1Pi6jizo"
-            crossorigin="anonymous"></script>
-        <script src="https://cdn.jsdelivr.net/npm/popper.js@1.14.7/dist/umd/popper.min.js"
-            integrity="sha384-UO2eT0CpHqdSJQ6hJty5KVphtPhzWj9WO1clHTMGa3JDZwrnQq4sF86dIHNDz0W1"
-            crossorigin="anonymous"></script>
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.3.1/dist/js/bootstrap.min.js"
-            integrity="sha384-JjSmVgyd0p3pXB1rRibZUAYoIIy6OrQ6VrjIEaFf/nJGzIxFDsf4x0xIM+B07jRM"
-            crossorigin="anonymous"></script>
-        <script src="index.js"></script>
+      <!-- Camera selector (for desktop with multiple cameras) -->
+      <select class="glass-input scanner-cam-select" id="camera-select" style="display:none"></select>
+    </div>
+  </div>
+
+  <!-- Toast notification -->
+  <div class="toast" id="toast"></div>
+
+  <!-- Main script -->
+  <script src="index.js"></script>
 </body>
-
 </html>
