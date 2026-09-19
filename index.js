@@ -585,18 +585,64 @@ document.getElementById('send-again-btn').addEventListener('click', () => {
 ──────────────────────────────────────────────────────────────────*/
 let receiverPeer   = null;
 let recvMeta       = null;
-let recvChunks     = [];
+let recvChunks     = [];        // used only in Blob-fallback mode
 let recvBytes      = 0;
 let recvT0         = null;
-let expectedSeq    = 0;       // tracks expected chunk sequence number
+let expectedSeq    = 0;         // chunk sequence counter
+
+/* StreamSaver state */
+let recvWriter     = null;      // WritableStreamDefaultWriter (stream mode)
+let recvMode       = 'buffer';  // 'stream' | 'buffer'
+
+/* ── Init StreamSaver mitm path ─────────────────────────────── */
+if (window.streamSaver) {
+  /* mitm.html is needed by Firefox / older Chrome (acts as a service-worker
+     proxy). Modern Chrome/Edge use the native File System Access API and
+     never need mitm at all.                                              */
+  streamSaver.mitm =
+    'https://cdn.jsdelivr.net/npm/streamsaver@2.0.6/examples/mitm.html';
+}
+
+/* ── Helper: choose streaming vs buffer mode ────────────────── */
+function openReceiveStream(meta) {
+  if (window.streamSaver) {
+    try {
+      const fileStream = streamSaver.createWriteStream(meta.name, {
+        size: meta.size   // lets browser show accurate progress in download bar
+      });
+      recvWriter = fileStream.getWriter();
+      recvMode   = 'stream';
+      recvChunks = [];
+      console.info('[Recv] StreamSaver active — writing directly to disk 🚀');
+      return;
+    } catch (e) {
+      console.warn('[Recv] StreamSaver.createWriteStream failed, using Blob fallback:', e);
+    }
+  }
+  /* Fallback — buffer everything in RAM then download as Blob */
+  recvWriter = null;
+  recvMode   = 'buffer';
+  recvChunks = [];
+  console.info('[Recv] Blob-buffer mode (StreamSaver unavailable)');
+}
+
+/* ── Helper: abort an in-progress stream cleanly ────────────── */
+function abortReceiveStream() {
+  if (recvWriter) {
+    recvWriter.abort().catch(() => {});
+    recvWriter = null;
+  }
+  recvMode   = 'buffer';
+  recvChunks = [];
+}
 
 document.getElementById('connect-btn').addEventListener('click', () => {
   const roomId = document.getElementById('room-input').value.trim();
   if (!roomId) { showToast('Enter a Room ID first.'); return; }
 
   /* Reset receiver state */
+  abortReceiveStream();
   recvMeta    = null;
-  recvChunks  = [];
   recvBytes   = 0;
   expectedSeq = 0;
 
@@ -608,8 +654,8 @@ document.getElementById('connect-btn').addEventListener('click', () => {
   receiverPeer.on('open', () => {
     /* serialization:'raw' bypasses PeerJS msgpack encoding — the #1 cause
        of cross-device binary corruption. In raw mode:
-         strings  → sent as UTF-8 strings  (used for metadata JSON)
-         ArrayBuffer → sent as raw binary  (used for file chunks)       */
+         strings      → sent as UTF-8 strings  (metadata JSON)
+         ArrayBuffer  → sent as raw binary      (file chunks)            */
     const conn = receiverPeer.connect(roomId, {
       reliable: true,
       serialization: 'raw'
@@ -626,12 +672,14 @@ document.getElementById('connect-btn').addEventListener('click', () => {
     conn.on('error', err => {
       showToast('Connection error: ' + err.type);
       console.error('[Recv conn error]', err);
+      abortReceiveStream();
       showState('receive-panel', 'state-enter-room');
     });
 
     conn.on('close', () => {
       if (recvMeta && recvBytes < recvMeta.size) {
         showToast('Connection closed before transfer finished.');
+        abortReceiveStream();
         showState('receive-panel', 'state-enter-room');
       }
     });
@@ -652,26 +700,48 @@ function handleRecvData(data) {
 
     if (msg.type === 'meta') {
       recvMeta    = msg;
-      recvChunks  = [];
       recvBytes   = 0;
       expectedSeq = 0;
       recvT0      = Date.now();
 
-      document.getElementById('recv-filename').textContent = msg.name;
+      /* Open streaming write-to-disk (or Blob fallback) */
+      openReceiveStream(msg);
+
+      document.getElementById('recv-filename').textContent =
+        msg.name + '  (' + fmtBytes(msg.size) + ')';
+
+      /* Show mode badge in UI */
+      const modeLabel = recvMode === 'stream'
+        ? '💾 Streaming to disk — no RAM limit'
+        : '📦 Buffering in RAM';
+      showToast(modeLabel, 3000);
+
       showState('receive-panel', 'state-transfer-recv');
       setTransferGlow(true, 'recv');
 
     } else if (msg.type === 'done') {
-      /* Assemble all chunks into a Blob and trigger browser download */
-      const blob   = new Blob(recvChunks, { type: recvMeta ? recvMeta.mimeType : 'application/octet-stream' });
-      const url    = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href          = url;
-      anchor.download      = recvMeta ? recvMeta.name : 'download';
-      anchor.style.display = 'none';
-      document.body.appendChild(anchor);
-      anchor.click();
-      setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 5000);
+
+      if (recvMode === 'stream' && recvWriter) {
+        /* Close the writable stream — StreamSaver finishes the download */
+        recvWriter.close()
+          .then(() => { console.info('[Recv] Stream closed ✓'); })
+          .catch(e => console.error('[Recv] Stream close error:', e));
+        recvWriter = null;
+
+      } else {
+        /* Blob fallback: assemble all buffered chunks and trigger download */
+        const mimeType = recvMeta ? recvMeta.mimeType : 'application/octet-stream';
+        const blob     = new Blob(recvChunks, { type: mimeType });
+        const url      = URL.createObjectURL(blob);
+        const anchor   = document.createElement('a');
+        anchor.href          = url;
+        anchor.download      = recvMeta ? recvMeta.name : 'download';
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 5000);
+        recvChunks = [];
+      }
 
       document.getElementById('recv-done-meta').textContent =
         recvMeta ? `${recvMeta.name}  ·  ${fmtBytes(recvMeta.size)}` : 'File received';
@@ -681,15 +751,14 @@ function handleRecvData(data) {
     return;
   }
 
-  /* ── Binary chunk (ArrayBuffer) ───────────────────────────── */
+  /* ── Binary chunk (ArrayBuffer / TypedArray / Blob) ─────── */
   let ab;
   if (data instanceof ArrayBuffer) {
     ab = data;
   } else if (ArrayBuffer.isView(data)) {
-    /* Uint8Array or other TypedArray — extract underlying buffer */
     ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
   } else if (data instanceof Blob) {
-    /* Last-resort sync fallback: queue and process in order using a reader */
+    /* Last-resort: queue Blobs and process FIFO (preserves order) */
     recvBlobQueue.push(data);
     if (!recvBlobProcessing) processBlobQueue();
     return;
@@ -701,25 +770,33 @@ function handleRecvData(data) {
   processChunk(ab);
 }
 
-/* Strip the 4-byte sequence header the sender prepends, validate order,
-   then push the payload bytes into recvChunks */
+/* ── processChunk: strip seq header → write to disk or buffer ─ */
 function processChunk(ab) {
   if (ab.byteLength < 4) {
-    console.warn('[Recv] Chunk too small:', ab.byteLength);
+    console.warn('[Recv] Chunk too small to contain seq header:', ab.byteLength);
     return;
   }
 
   const view    = new DataView(ab);
-  const seq     = view.getUint32(0, false); // big-endian
-  const payload = ab.slice(4);              // actual file bytes
+  const seq     = view.getUint32(0, false);  // big-endian sequence number
+  const payload = ab.slice(4);               // actual file bytes
 
+  /* Sequence validation — should never fire with reliable DataChannel */
   if (seq !== expectedSeq) {
-    console.error(`[Recv] Out-of-order chunk! expected=${expectedSeq} got=${seq}. File may be corrupt.`);
-    showToast(`⚠️ Chunk order error (seq ${seq} ≠ ${expectedSeq})`);
+    console.error(`[Recv] Out-of-order! expected=${expectedSeq} got=${seq}`);
+    showToast(`⚠️ Chunk order error at seq ${seq}`);
   }
   expectedSeq++;
 
-  recvChunks.push(payload);
+  /* ── Route chunk: disk stream or RAM buffer ─────────────── */
+  if (recvMode === 'stream' && recvWriter) {
+    /* WritableStream queues writes internally — FIFO, no await needed.
+       The stream handles backpressure against the disk automatically.  */
+    recvWriter.write(new Uint8Array(payload));
+  } else {
+    recvChunks.push(payload);
+  }
+
   recvBytes += payload.byteLength;
 
   /* Update progress UI */
@@ -730,10 +807,11 @@ function processChunk(ab) {
   document.getElementById('recv-pct').textContent = pct + '%';
 
   const elapsed = Math.max((Date.now() - recvT0) / 1000, 0.001);
-  document.getElementById('recv-speed').textContent = fmtBytes(recvBytes / elapsed) + '/s';
+  document.getElementById('recv-speed').textContent =
+    fmtBytes(recvBytes / elapsed) + '/s';
 }
 
-/* ── Blob fallback queue (processes in strict FIFO order) ─── */
+/* ── Blob fallback queue — FIFO async processing ─────────────── */
 const recvBlobQueue      = [];
 let   recvBlobProcessing = false;
 
@@ -741,7 +819,7 @@ async function processBlobQueue() {
   recvBlobProcessing = true;
   while (recvBlobQueue.length > 0) {
     const blob = recvBlobQueue.shift();
-    const ab   = await blob.arrayBuffer(); // await one at a time → in order
+    const ab   = await blob.arrayBuffer(); // one at a time → strict order
     processChunk(ab);
   }
   recvBlobProcessing = false;
@@ -750,11 +828,16 @@ async function processBlobQueue() {
 /* Receive Again */
 document.getElementById('recv-again-btn').addEventListener('click', () => {
   document.getElementById('room-input').value = '';
-  recvMeta = null; recvChunks = []; recvBytes = 0; expectedSeq = 0;
-  recvBlobQueue.length = 0; recvBlobProcessing = false;
+  abortReceiveStream();
+  recvMeta    = null;
+  recvBytes   = 0;
+  expectedSeq = 0;
+  recvBlobQueue.length = 0;
+  recvBlobProcessing   = false;
   if (receiverPeer) { receiverPeer.destroy(); receiverPeer = null; }
   showState('receive-panel', 'state-enter-room');
 });
+
 
 
 /* ─────────────────────────────────────────────────────────────────
