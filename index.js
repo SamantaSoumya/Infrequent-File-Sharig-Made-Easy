@@ -435,6 +435,8 @@ document.getElementById('generate-btn').addEventListener('click', async () => {
     /* Wait for receiver */
     senderPeer.on('connection', conn => {
       conn.on('open', () => {
+        /* Force binary type — prevents Blob delivery on some browsers */
+        if (conn.dataChannel) conn.dataChannel.binaryType = 'arraybuffer';
         startSending(conn, fileToSend);
       });
       conn.on('error', err => {
@@ -460,7 +462,7 @@ function startSending(conn, file) {
 
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-  /* Send metadata first */
+  /* Send metadata first (JSON string — PeerJS raw mode passes strings as-is) */
   conn.send(JSON.stringify({
     type: 'meta',
     name: file.name,
@@ -469,13 +471,15 @@ function startSending(conn, file) {
     totalChunks
   }));
 
+  /* Use async/await with Blob.arrayBuffer() — avoids FileReader callback
+     race conditions and guarantees sequential chunk delivery */
   let offset    = 0;
   let bytesSent = 0;
+  let seq       = 0;          // chunk sequence number
   const t0      = Date.now();
 
-  function sendNextChunk() {
+  async function sendNextChunk() {
     if (offset >= file.size) {
-      /* All chunks sent */
       conn.send(JSON.stringify({ type: 'done' }));
       setTransferGlow(false);
       showState('send-panel', 'state-send-done');
@@ -483,44 +487,53 @@ function startSending(conn, file) {
     }
 
     const slice = file.slice(offset, offset + CHUNK_SIZE);
-    const reader = new FileReader();
 
-    reader.onload = ev => {
-      conn.send(ev.target.result);
-      offset    += ev.target.result.byteLength;
-      bytesSent += ev.target.result.byteLength;
+    /* Blob.arrayBuffer() is the modern, non-callback way to read binary —
+       awaiting here ensures strict sequential sending */
+    const ab = await slice.arrayBuffer();
 
-      /* Update UI */
-      const pct = Math.min(100, Math.round((offset / file.size) * 100));
-      document.getElementById('send-progress-fill').style.width = pct + '%';
-      document.getElementById('send-pct').textContent = pct + '%';
+    /* Prepend a 4-byte sequence number to each chunk so the receiver can
+       detect and reject out-of-order delivery (safety net) */
+    const packet = new Uint8Array(4 + ab.byteLength);
+    new DataView(packet.buffer).setUint32(0, seq, false); // big-endian seq
+    packet.set(new Uint8Array(ab), 4);
 
-      const elapsed = (Date.now() - t0) / 1000 || 0.001;
-      document.getElementById('send-speed').textContent = fmtBytes(bytesSent / elapsed) + '/s';
+    conn.send(packet.buffer);
+    offset    += ab.byteLength;
+    bytesSent += ab.byteLength;
+    seq++;
 
-      /* Flow control: back off if DataChannel buffer is filling up */
-      const dc = conn.dataChannel;
-      if (dc && dc.bufferedAmount > 3 * 1024 * 1024) {
-        waitForDrain(dc, sendNextChunk);
-      } else {
-        sendNextChunk();
-      }
-    };
+    /* Update UI */
+    const pct = Math.min(100, Math.round((offset / file.size) * 100));
+    document.getElementById('send-progress-fill').style.width = pct + '%';
+    document.getElementById('send-pct').textContent = pct + '%';
 
-    reader.onerror = () => showToast('File read error');
-    reader.readAsArrayBuffer(slice);
+    const elapsed = (Date.now() - t0) / 1000 || 0.001;
+    document.getElementById('send-speed').textContent = fmtBytes(bytesSent / elapsed) + '/s';
+
+    /* Flow control: pause if DataChannel buffer is filling up */
+    const dc = conn.dataChannel;
+    if (dc && dc.bufferedAmount > 3 * 1024 * 1024) {
+      await drainBuffer(dc);
+    }
+
+    sendNextChunk();
   }
 
   sendNextChunk();
 }
 
-function waitForDrain(dc, cb) {
-  if (dc.bufferedAmount < 512 * 1024) {
-    cb();
-  } else {
-    setTimeout(() => waitForDrain(dc, cb), 60);
-  }
+/* Promisified buffer drain — waits until bufferedAmount drops below 512KB */
+function drainBuffer(dc) {
+  return new Promise(resolve => {
+    function check() {
+      if (dc.bufferedAmount < 512 * 1024) resolve();
+      else setTimeout(check, 50);
+    }
+    check();
+  });
 }
+
 
 /* Copy Room ID */
 document.getElementById('copy-btn').addEventListener('click', () => {
@@ -575,15 +588,17 @@ let recvMeta       = null;
 let recvChunks     = [];
 let recvBytes      = 0;
 let recvT0         = null;
+let expectedSeq    = 0;       // tracks expected chunk sequence number
 
 document.getElementById('connect-btn').addEventListener('click', () => {
   const roomId = document.getElementById('room-input').value.trim();
   if (!roomId) { showToast('Enter a Room ID first.'); return; }
 
   /* Reset receiver state */
-  recvMeta   = null;
-  recvChunks = [];
-  recvBytes  = 0;
+  recvMeta    = null;
+  recvChunks  = [];
+  recvBytes   = 0;
+  expectedSeq = 0;
 
   showState('receive-panel', 'state-connecting');
 
@@ -591,9 +606,18 @@ document.getElementById('connect-btn').addEventListener('click', () => {
   receiverPeer = new Peer();
 
   receiverPeer.on('open', () => {
-    const conn = receiverPeer.connect(roomId, { reliable: true });
+    /* serialization:'raw' bypasses PeerJS msgpack encoding — the #1 cause
+       of cross-device binary corruption. In raw mode:
+         strings  → sent as UTF-8 strings  (used for metadata JSON)
+         ArrayBuffer → sent as raw binary  (used for file chunks)       */
+    const conn = receiverPeer.connect(roomId, {
+      reliable: true,
+      serialization: 'raw'
+    });
 
     conn.on('open', () => {
+      /* Force arraybuffer mode — prevents Blob delivery on Safari/mobile */
+      if (conn.dataChannel) conn.dataChannel.binaryType = 'arraybuffer';
       showToast('Connected! Waiting for file…');
     });
 
@@ -621,63 +645,117 @@ document.getElementById('connect-btn').addEventListener('click', () => {
 });
 
 function handleRecvData(data) {
+  /* ── JSON control messages (string) ──────────────────────── */
   if (typeof data === 'string') {
-    const msg = JSON.parse(data);
+    let msg;
+    try { msg = JSON.parse(data); } catch { return; }
 
     if (msg.type === 'meta') {
-      recvMeta   = msg;
-      recvChunks = [];
-      recvBytes  = 0;
-      recvT0     = Date.now();
+      recvMeta    = msg;
+      recvChunks  = [];
+      recvBytes   = 0;
+      expectedSeq = 0;
+      recvT0      = Date.now();
 
       document.getElementById('recv-filename').textContent = msg.name;
       showState('receive-panel', 'state-transfer-recv');
       setTransferGlow(true, 'recv');
 
     } else if (msg.type === 'done') {
-      /* Assemble and trigger download */
-      const blob   = new Blob(recvChunks, { type: recvMeta.mimeType });
+      /* Assemble all chunks into a Blob and trigger browser download */
+      const blob   = new Blob(recvChunks, { type: recvMeta ? recvMeta.mimeType : 'application/octet-stream' });
       const url    = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
-      anchor.href     = url;
-      anchor.download = recvMeta.name;
+      anchor.href          = url;
+      anchor.download      = recvMeta ? recvMeta.name : 'download';
       anchor.style.display = 'none';
       document.body.appendChild(anchor);
       anchor.click();
       setTimeout(() => { URL.revokeObjectURL(url); anchor.remove(); }, 5000);
 
       document.getElementById('recv-done-meta').textContent =
-        `${recvMeta.name}  ·  ${fmtBytes(recvMeta.size)}`;
+        recvMeta ? `${recvMeta.name}  ·  ${fmtBytes(recvMeta.size)}` : 'File received';
       setTransferGlow(false);
       showState('receive-panel', 'state-recv-done');
     }
-
-  } else if (data instanceof ArrayBuffer) {
-    recvChunks.push(data);
-    recvBytes += data.byteLength;
-
-    const pct = recvMeta
-      ? Math.min(100, Math.round((recvBytes / recvMeta.size) * 100))
-      : 0;
-    document.getElementById('recv-progress-fill').style.width = pct + '%';
-    document.getElementById('recv-pct').textContent = pct + '%';
-
-    const elapsed = Math.max((Date.now() - recvT0) / 1000, 0.001);
-    document.getElementById('recv-speed').textContent = fmtBytes(recvBytes / elapsed) + '/s';
-
-  } else if (data instanceof Blob) {
-    /* Some browsers deliver Blob instead of ArrayBuffer */
-    data.arrayBuffer().then(ab => handleRecvData(ab));
+    return;
   }
+
+  /* ── Binary chunk (ArrayBuffer) ───────────────────────────── */
+  let ab;
+  if (data instanceof ArrayBuffer) {
+    ab = data;
+  } else if (ArrayBuffer.isView(data)) {
+    /* Uint8Array or other TypedArray — extract underlying buffer */
+    ab = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  } else if (data instanceof Blob) {
+    /* Last-resort sync fallback: queue and process in order using a reader */
+    recvBlobQueue.push(data);
+    if (!recvBlobProcessing) processBlobQueue();
+    return;
+  } else {
+    console.warn('[Recv] Unknown data type:', typeof data, data);
+    return;
+  }
+
+  processChunk(ab);
+}
+
+/* Strip the 4-byte sequence header the sender prepends, validate order,
+   then push the payload bytes into recvChunks */
+function processChunk(ab) {
+  if (ab.byteLength < 4) {
+    console.warn('[Recv] Chunk too small:', ab.byteLength);
+    return;
+  }
+
+  const view    = new DataView(ab);
+  const seq     = view.getUint32(0, false); // big-endian
+  const payload = ab.slice(4);              // actual file bytes
+
+  if (seq !== expectedSeq) {
+    console.error(`[Recv] Out-of-order chunk! expected=${expectedSeq} got=${seq}. File may be corrupt.`);
+    showToast(`⚠️ Chunk order error (seq ${seq} ≠ ${expectedSeq})`);
+  }
+  expectedSeq++;
+
+  recvChunks.push(payload);
+  recvBytes += payload.byteLength;
+
+  /* Update progress UI */
+  const pct = recvMeta
+    ? Math.min(100, Math.round((recvBytes / recvMeta.size) * 100))
+    : 0;
+  document.getElementById('recv-progress-fill').style.width = pct + '%';
+  document.getElementById('recv-pct').textContent = pct + '%';
+
+  const elapsed = Math.max((Date.now() - recvT0) / 1000, 0.001);
+  document.getElementById('recv-speed').textContent = fmtBytes(recvBytes / elapsed) + '/s';
+}
+
+/* ── Blob fallback queue (processes in strict FIFO order) ─── */
+const recvBlobQueue      = [];
+let   recvBlobProcessing = false;
+
+async function processBlobQueue() {
+  recvBlobProcessing = true;
+  while (recvBlobQueue.length > 0) {
+    const blob = recvBlobQueue.shift();
+    const ab   = await blob.arrayBuffer(); // await one at a time → in order
+    processChunk(ab);
+  }
+  recvBlobProcessing = false;
 }
 
 /* Receive Again */
 document.getElementById('recv-again-btn').addEventListener('click', () => {
   document.getElementById('room-input').value = '';
-  recvMeta = null; recvChunks = []; recvBytes = 0;
+  recvMeta = null; recvChunks = []; recvBytes = 0; expectedSeq = 0;
+  recvBlobQueue.length = 0; recvBlobProcessing = false;
   if (receiverPeer) { receiverPeer.destroy(); receiverPeer = null; }
   showState('receive-panel', 'state-enter-room');
 });
+
 
 /* ─────────────────────────────────────────────────────────────────
    7.  QR CODE DEEP LINK  — auto-fill Room ID from URL ?room=
